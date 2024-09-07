@@ -1,0 +1,12 @@
+https://lyd.nrk.no/nrk_radio_jazz_mp3_m
+https://113fm-edge2.cdnstream.com/1816_128
+https://ais-sa2.cdnstream1.com/1992_128.mp3
+https://jazzblues.ice.infomaniak.ch/jazzblues-high.mp3
+http://prmstrm.1.fm:8000/electronica
+http://prmstrm.1.fm:8000/x
+http://stream81.metacast.eu/radio1rock128
+https://20073.live.streamtheworld.com/100PNL_MP3_SC
+https://icecast.omroep.nl/radio6-bb-mp3
+https://live-bauerno.sharp-stream.com/radiorock_no_mp3
+https://0n-electro.radionetz.de/0n-electro.mp3
+https://pub0102.101.ru:8443/stream/trust/mp3/128/7

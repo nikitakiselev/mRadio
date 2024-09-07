@@ -4,15 +4,19 @@
 #include <EncButton.h>
 #include <EEManager.h>
 #include <ArduinoOTA.h>
+#include <SPIFFS.h>
 
 #define AP_SSID "Skynet"
 #define AP_PASS "eZ8n8viD"
+
+#define MILLIS_MULTIPLIER 1000
+#define MAX_STATIONS_COUNT 50
 
 // Digital I/O used for DAC
 #define I2S_DOUT      GPIO_NUM_25
 #define I2S_BCLK      GPIO_NUM_27
 #define I2S_LRC       GPIO_NUM_26
-#define RADIO_BUFFER (1600 * 25)  // default 1600*5, этого МАЛО
+#define RADIO_BUFFER (1600 * 30)  // default 1600*5, этого МАЛО
 #define VOLUME_DEFAULT 1
 #define VOLUME_MIN 1
 #define VOLUME_MAX 20
@@ -31,21 +35,8 @@ Button btnPlus(BTN_PLUS_PIN, INPUT_PULLDOWN);
 
 Audio audio;
 bool mustReconnect = false;
-uint8_t stationsCount = 12;
-const char* stations[] = {
-    "https://uk3.internet-radio.com/proxy/majesticjukebox?mp=/live",
-    "http://prmstrm.1.fm:8000/electronica",
-    "http://prmstrm.1.fm:8000/x",
-    "http://stream81.metacast.eu/radio1rock128",
-    "http://mp3.ffh.de/radioffh/hqlivestream.mp3",
-    "https://20073.live.streamtheworld.com/100PNL_MP3_SC",
-    "https://icecast.omroep.nl/radio6-bb-mp3",
-    "https://lyd.nrk.no/nrk_radio_jazz_mp3_h",
-    "https://lyd.nrk.no/nrk_radio_folkemusikk_mp3_h",
-    "https://live-bauerno.sharp-stream.com/radiorock_no_mp3",
-    "https://0n-electro.radionetz.de/0n-electro.mp3",
-    "https://pub0102.101.ru:8443/stream/trust/mp3/128/7"
-};
+uint8_t stationsCount = 0;
+String stations[MAX_STATIONS_COUNT];
 
 struct Settings {
   uint8_t stationIndex = 0;
@@ -69,6 +60,14 @@ void print_wakeup_reason(){
     case ESP_SLEEP_WAKEUP_ULP : Serial.println("Wakeup caused by ULP program"); break;
     default : Serial.printf("Wakeup was not caused by deep sleep: %d\n",wakeup_reason); break;
   }
+}
+
+void delayed_esp_restart(uint32_t seconds = 5) {
+  char buf[50];
+  sprintf(buf, "The system will restart in %d seconds...", seconds); 
+  Serial.println(buf);
+  delay(seconds * MILLIS_MULTIPLIER);
+  esp_restart();
 }
 
 void setup() {
@@ -143,6 +142,36 @@ void setup() {
     audio.setVolume(settings.volume);
     audio.setTone(6, -10, 4);
 
+    Serial.println("Read radio stations from SPIFFS.");
+    if(! SPIFFS.begin(true)){
+      Serial.println("An Error has occurred while mounting SPIFFS");
+      delayed_esp_restart();
+      return;
+    }
+
+    File file = SPIFFS.open("/stations.txt");
+    if(! file){
+      Serial.println("Failed to open stations.txt for reading");
+      return;
+    }
+    Serial.println("File stations.txt found.");
+    Serial.println("File Content:");
+
+    while(stationsCount < MAX_STATIONS_COUNT && file.available()) {
+      stations[stationsCount] = file.readStringUntil('\n');
+      stationsCount++;
+    }
+    file.close();
+
+    Serial.print("Read ");
+    Serial.print(stationsCount);
+    Serial.println(" stations from file.");
+
+    Serial.println("Here the list of the stations.");
+    for (int i = 0; i < stationsCount; i++) {
+      Serial.println(stations[i]);
+    }
+    
     mustReconnect = true;
 }
 
@@ -193,6 +222,24 @@ void loop() {
     mustReconnect = true;
   }
 
+  if (btnPlay.hasClicks(3)) {
+    if (settings.stationIndex - 1 < 0) {
+      settings.stationIndex = (stationsCount - 1);
+    } else {
+      settings.stationIndex--;
+    }
+
+    Serial.print("Current station index: ");
+    Serial.print(settings.stationIndex);
+    Serial.print(" (");
+    Serial.print(stations[settings.stationIndex]);
+    Serial.println(")");
+
+    memory.update();
+    
+    mustReconnect = true;
+  }
+
   if (btnPower.releaseHold()) {
     Serial.println("Going to sleep now");
     esp_deep_sleep_start();
@@ -201,7 +248,7 @@ void loop() {
   audio.loop();
 
   if (mustReconnect == true) {
-    audio.connecttohost(stations[settings.stationIndex]);
+    audio.connecttohost(stations[settings.stationIndex].c_str());
     if (!audio.isRunning()) audio.pauseResume();
     mustReconnect = false;
   }
