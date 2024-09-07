@@ -3,24 +3,25 @@
 #include <WiFi.h>
 #include <EncButton.h>
 #include <EEManager.h>
+#include <ArduinoOTA.h>
 
 #define AP_SSID "Skynet"
 #define AP_PASS "eZ8n8viD"
 
 // Digital I/O used for DAC
-#define I2S_DOUT      25
-#define I2S_BCLK      27
-#define I2S_LRC       26
+#define I2S_DOUT      GPIO_NUM_25
+#define I2S_BCLK      GPIO_NUM_27
+#define I2S_LRC       GPIO_NUM_26
 #define RADIO_BUFFER (1600 * 25)  // default 1600*5, этого МАЛО
 #define VOLUME_DEFAULT 1
 #define VOLUME_MIN 1
-#define VOLUME_MAX 10
+#define VOLUME_MAX 20
 
 // Button settings and pins.
-#define BTN_POWER_PIN 23
-#define BTN_PLAY_PIN 21
-#define BTN_MINUS_PIN 16
-#define BTN_PLUS_PIN 4
+#define BTN_POWER_PIN   GPIO_NUM_32
+#define BTN_PLAY_PIN    GPIO_NUM_21
+#define BTN_MINUS_PIN   GPIO_NUM_16
+#define BTN_PLUS_PIN    GPIO_NUM_4
 #define EB_HOLD_TIME 1000
 
 Button btnPower(BTN_POWER_PIN, INPUT_PULLDOWN);
@@ -30,7 +31,7 @@ Button btnPlus(BTN_PLUS_PIN, INPUT_PULLDOWN);
 
 Audio audio;
 bool mustReconnect = false;
-uint8_t stationsCount = 10;
+uint8_t stationsCount = 12;
 const char* stations[] = {
     "https://uk3.internet-radio.com/proxy/majesticjukebox?mp=/live",
     "http://prmstrm.1.fm:8000/electronica",
@@ -41,7 +42,9 @@ const char* stations[] = {
     "https://icecast.omroep.nl/radio6-bb-mp3",
     "https://lyd.nrk.no/nrk_radio_jazz_mp3_h",
     "https://lyd.nrk.no/nrk_radio_folkemusikk_mp3_h",
-    "https://live-bauerno.sharp-stream.com/radiorock_no_mp3"
+    "https://live-bauerno.sharp-stream.com/radiorock_no_mp3",
+    "https://0n-electro.radionetz.de/0n-electro.mp3",
+    "https://pub0102.101.ru:8443/stream/trust/mp3/128/7"
 };
 
 struct Settings {
@@ -52,12 +55,31 @@ struct Settings {
 Settings settings;
 EEManager memory(settings);
 
+void print_wakeup_reason(){
+  esp_sleep_wakeup_cause_t wakeup_reason;
+
+  wakeup_reason = esp_sleep_get_wakeup_cause();
+
+  switch(wakeup_reason)
+  {
+    case ESP_SLEEP_WAKEUP_EXT0 : Serial.println("Wakeup caused by external signal using RTC_IO"); break;
+    case ESP_SLEEP_WAKEUP_EXT1 : Serial.println("Wakeup caused by external signal using RTC_CNTL"); break;
+    case ESP_SLEEP_WAKEUP_TIMER : Serial.println("Wakeup caused by timer"); break;
+    case ESP_SLEEP_WAKEUP_TOUCHPAD : Serial.println("Wakeup caused by touchpad"); break;
+    case ESP_SLEEP_WAKEUP_ULP : Serial.println("Wakeup caused by ULP program"); break;
+    default : Serial.printf("Wakeup was not caused by deep sleep: %d\n",wakeup_reason); break;
+  }
+}
+
 void setup() {
     Serial.begin(115200);
     Serial.println();
     Serial.println();
     Serial.println("WIFI mRadio");
     Serial.print("Connecting to WIFI");
+
+    print_wakeup_reason();
+    esp_sleep_enable_ext0_wakeup(BTN_POWER_PIN, 0); //1 = High, 0 = Low
 
     EEPROM.begin(memory.blockSize());
     memory.begin(0, 'b');
@@ -76,6 +98,41 @@ void setup() {
       delay(1000);
     }
 
+    ArduinoOTA
+      .onStart([]() {
+        String type;
+        if (ArduinoOTA.getCommand() == U_FLASH) {
+          type = "sketch";
+        } else {  // U_SPIFFS
+          type = "filesystem";
+        }
+
+        // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
+        Serial.println("Start updating " + type);
+      })
+      .onEnd([]() {
+        Serial.println("\nEnd");
+      })
+      .onProgress([](unsigned int progress, unsigned int total) {
+        Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+      })
+      .onError([](ota_error_t error) {
+        Serial.printf("Error[%u]: ", error);
+        if (error == OTA_AUTH_ERROR) {
+          Serial.println("Auth Failed");
+        } else if (error == OTA_BEGIN_ERROR) {
+          Serial.println("Begin Failed");
+        } else if (error == OTA_CONNECT_ERROR) {
+          Serial.println("Connect Failed");
+        } else if (error == OTA_RECEIVE_ERROR) {
+          Serial.println("Receive Failed");
+        } else if (error == OTA_END_ERROR) {
+          Serial.println("End Failed");
+        }
+      });
+
+    ArduinoOTA.begin();
+
     Serial.println();
     Serial.println("WIFI connected.");
     Serial.println(WiFi.localIP());
@@ -84,6 +141,7 @@ void setup() {
     audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
     audio.forceMono(true);
     audio.setVolume(settings.volume);
+    audio.setTone(6, -10, 4);
 
     mustReconnect = true;
 }
@@ -94,6 +152,7 @@ void loop() {
   btnPlay.tick();
   btnPower.tick();
   if (memory.tick()) Serial.println("Memory Updated!");
+  ArduinoOTA.handle();
 
   if (btnMinus.click()) {
     settings.volume = constrain(settings.volume - 1, VOLUME_MIN, VOLUME_MAX);
@@ -134,10 +193,9 @@ void loop() {
     mustReconnect = true;
   }
 
-  if (btnPower.holding()) {
-    Serial.println("Restarting in 2 seconds");
-    delay(2000);
-    ESP.restart();
+  if (btnPower.releaseHold()) {
+    Serial.println("Going to sleep now");
+    esp_deep_sleep_start();
   }
 
   audio.loop();
@@ -180,3 +238,4 @@ void loop() {
 // void audio_eof_speech(const char *info){
 //     Serial.print("eof_speech  ");Serial.println(info);
 // }
+
