@@ -28,6 +28,9 @@
 #define BTN_PLUS_PIN    GPIO_NUM_4
 #define EB_HOLD_TIME 1000
 
+// LED
+#define LED_PIN GPIO_NUM_13
+
 Button btnPower(BTN_POWER_PIN, INPUT_PULLDOWN);
 Button btnPlay(BTN_PLAY_PIN, INPUT_PULLDOWN);
 Button btnMinus(BTN_MINUS_PIN, INPUT_PULLDOWN);
@@ -45,6 +48,8 @@ struct Settings {
 
 Settings settings;
 EEManager memory(settings);
+
+bool ledStatus = false;
 
 void print_wakeup_reason(){
   esp_sleep_wakeup_cause_t wakeup_reason;
@@ -70,7 +75,19 @@ void delayed_esp_restart(uint32_t seconds = 5) {
   esp_restart();
 }
 
+void ledBlink() {
+  // if (ledStatus) {
+  //   analogWrite(LED_PIN, 100);
+  // } else {
+  //   analogWrite(LED_PIN, 0);
+  // }
+}
+
 void setup() {
+    pinMode(LED_PIN, OUTPUT);
+    
+    analogWrite(LED_PIN, 100);
+
     Serial.begin(115200);
     Serial.println();
     Serial.println();
@@ -94,7 +111,10 @@ void setup() {
 
     while (WiFi.status() != WL_CONNECTED) {
       Serial.print(".");
-      delay(1000);
+      analogWrite(LED_PIN, 100);
+      delay(200);
+      analogWrite(LED_PIN, 0);
+      delay(200);
     }
 
     ArduinoOTA
@@ -173,6 +193,7 @@ void setup() {
     }
     
     mustReconnect = true;
+    ledStatus = false;
 }
 
 void loop() {
@@ -182,6 +203,8 @@ void loop() {
   btnPower.tick();
   if (memory.tick()) Serial.println("Memory Updated!");
   ArduinoOTA.handle();
+
+  ledBlink();
 
   if (btnMinus.click()) {
     settings.volume = constrain(settings.volume - 1, VOLUME_MIN, VOLUME_MAX);
@@ -248,6 +271,8 @@ void loop() {
   audio.loop();
 
   if (mustReconnect == true) {
+    analogWrite(LED_PIN, 30);
+    Serial.print("Connect to host...");;
     audio.connecttohost(stations[settings.stationIndex].c_str());
     if (!audio.isRunning()) audio.pauseResume();
     mustReconnect = false;
@@ -255,18 +280,19 @@ void loop() {
 }
 
 // optional
-// void audio_info(const char *info){
-//     Serial.print("info        "); Serial.println(info);
-// }
+void audio_info(const char *info){
+  Serial.print("info        "); Serial.println(info);
+}
 // void audio_id3data(const char *info){  //id3 metadata
 //     Serial.print("id3data     ");Serial.println(info);
 // }
 // void audio_eof_mp3(const char *info){  //end of file
 //     Serial.print("eof_mp3     ");Serial.println(info);
 // }
-// void audio_showstation(const char *info){
-//     Serial.print("station     ");Serial.println(info);
-// }
+void audio_showstation(const char *info){
+  analogWrite(LED_PIN, 0);
+    Serial.print("station     ");Serial.println(info);
+}
 // void audio_showstreamtitle(const char *info){
 //     Serial.print("streamtitle ");Serial.println(info);
 // }
